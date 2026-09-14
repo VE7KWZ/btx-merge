@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Combine Tool Chests — .btx merge</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.2.0/pako.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root{
+    /* Edit these to reskin the page -- layout and type are unaffected. */
+    --color-primary:#E8A23D;
+    --color-primary-dim:#8A6428;
+    --color-primary-contrast:#0F2338;
+
+    --color-bg:#0F2338;
+    --color-bg-panel:#152E4A;
+    --color-bg-panel-alt:#1C3B5C;
+
+    --color-border:#3E6690;
+
+    --color-text:#EDEFF3;
+    --color-text-dim:#93AAC6;
+
+    --color-danger:#D9704F;
+
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+    --sans: 'IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+
+  body{
+    background:
+      linear-gradient(var(--color-bg),var(--color-bg)),
+      repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-text) 6%, transparent) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, color-mix(in srgb, var(--color-text) 6%, transparent) 0 1px, transparent 1px 24px);
+    color:var(--color-text);
+    font-family:var(--sans);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:48px 20px 0;
+  }
+
+  .sheet{
+    width:100%;
+    max-width:640px;
+    border:1px solid var(--color-border);
+    background:var(--color-bg-panel);
+  }
+
+  header{
+    padding:28px 28px 20px;
+    border-bottom:1px solid var(--color-border);
+  }
+
+  header h1{
+    font-size:22px;
+    font-weight:600;
+    margin:0 0 6px;
+    letter-spacing:0.2px;
+  }
+
+  header p{
+    margin:0;
+    color:var(--color-text-dim);
+    font-size:14.5px;
+    line-height:1.55;
+    max-width:60ch;
+  }
+
+  header p code{
+    font-family:var(--mono);
+    font-size:13px;
+    background:var(--color-bg-panel-alt);
+    padding:1px 5px;
+    border:1px solid var(--color-border);
+  }
+
+  main{padding:24px 28px 28px;}
+
+  .dropzone{
+    position:relative;
+    border:1px dashed var(--color-border);
+    padding:36px 20px;
+    text-align:center;
+    cursor:pointer;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .dropzone::before,.dropzone::after,
+  .dropzone .tick-tl,.dropzone .tick-br{
+    content:'';
+    position:absolute;
+    width:10px;
+    height:10px;
+    border:1px solid var(--color-text-dim);
+    opacity:.6;
+  }
+  .dropzone::before{top:6px;left:6px;border-right:none;border-bottom:none;}
+  .dropzone::after{bottom:6px;right:6px;border-left:none;border-top:none;}
+
+  .dropzone:hover, .dropzone.drag{
+    border-color:var(--color-primary);
+    background:color-mix(in srgb, var(--color-primary) 5%, transparent);
+  }
+
+  .dropzone input{display:none;}
+
+  .dz-label{font-size:15px;font-weight:500;}
+  .dz-sub{font-size:13px;color:var(--color-text-dim);margin-top:6px;}
+
+  .filelist{
+    margin-top:18px;
+    border:1px solid var(--color-border);
+  }
+  .filelist:empty{display:none;}
+
+  .file-row{
+    display:flex;
+    align-items:center;
+    padding:10px 14px;
+    font-family:var(--mono);
+    font-size:13px;
+    border-bottom:1px solid var(--color-border);
+  }
+  .file-row:last-child{border-bottom:none;}
+  .file-row.error{color:var(--color-danger);}
+  .file-row.dragging{opacity:0.4;}
+  .file-row.drag-over{border-top:2px solid var(--color-primary);}
+
+  .file-grip{
+    flex-shrink:0;
+    width:14px;
+    height:14px;
+    margin-right:10px;
+    cursor:grab;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:3px;
+  }
+  .file-grip span{
+    display:block;
+    height:1px;
+    background:var(--color-text-dim);
+  }
+  .file-row:hover .file-grip span{background:var(--color-text);}
+
+  .file-order{
+    flex-shrink:0;
+    width:18px;
+    color:var(--color-text-dim);
+    margin-right:10px;
+  }
+
+  .file-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;margin-right:12px;}
+  .file-meta{color:var(--color-text-dim);white-space:nowrap;}
+
+  .file-actions{
+    display:flex;
+    align-items:center;
+    flex-shrink:0;
+    margin-left:14px;
+  }
+  .file-actions button{
+    background:none;border:none;color:var(--color-text-dim);
+    cursor:pointer;font-family:var(--mono);
+    line-height:1;padding:2px 0 2px 10px;
+  }
+  .file-actions button:disabled{color:var(--color-bg-panel-alt);cursor:default;}
+  .file-actions button:not(:disabled):hover{color:var(--color-primary);}
+  .file-remove:not(:disabled):hover{color:var(--color-danger) !important;}
+  .file-move{font-size:11px;}
+  .file-remove{font-size:15px;}
+
+  .options{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top:16px;
+    font-size:13.5px;
+    color:var(--color-text-dim);
+  }
+  .options input{accent-color:var(--color-primary);}
+  .options label{cursor:pointer;}
+
+  .field{
+    margin-top:14px;
+  }
+  .field label{
+    display:block;
+    font-size:12.5px;
+    color:var(--color-text-dim);
+    margin-bottom:6px;
+  }
+  .field input{
+    width:100%;
+    background:var(--color-bg);
+    border:1px solid var(--color-border);
+    color:var(--color-text);
+    font-family:var(--mono);
+    font-size:13.5px;
+    padding:9px 12px;
+  }
+  .field input:focus{
+    outline:none;
+    border-color:var(--color-primary);
+  }
+
+  button.primary{
+    display:block;
+    width:100%;
+    margin-top:20px;
+    padding:13px 16px;
+    background:var(--color-primary);
+    color:var(--color-primary-contrast);
+    border:none;
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:15px;
+    cursor:pointer;
+    transition:background .15s ease;
+  }
+  button.primary:disabled{
+    background:var(--color-bg-panel-alt);
+    color:var(--color-text-dim);
+    cursor:not-allowed;
+  }
+  button.primary:not(:disabled):hover{background:color-mix(in srgb, var(--color-primary) 85%, white);}
+
+  .log{
+    margin-top:18px;
+    background:var(--color-bg);
+    border:1px solid var(--color-border);
+    padding:14px 16px;
+    font-family:var(--mono);
+    font-size:12.5px;
+    line-height:1.7;
+    white-space:pre-wrap;
+    max-height:220px;
+    overflow-y:auto;
+    color:var(--color-text-dim);
+  }
+  .log:empty{display:none;}
+  .log .warn{color:var(--color-primary);}
+
+  .result{
+    margin-top:18px;
+    display:none;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 16px;
+    border:1px solid var(--color-primary-dim);
+    background:color-mix(in srgb, var(--color-primary) 8%, transparent);
+  }
+  .result.show{display:flex;}
+  .result-text{font-size:13.5px;}
+  .result-text strong{font-family:var(--mono);}
+  .download-btn{
+    flex-shrink:0;
+    background:var(--color-text);
+    color:var(--color-bg);
+    border:none;
+    font-family:var(--sans);
+    font-weight:600;
+    font-size:13.5px;
+    padding:9px 14px;
+    cursor:pointer;
+  }
+  .download-btn:hover{background:color-mix(in srgb, var(--color-text) 85%, white);}
+
+  .titleblock{
+    width:100%;
+    max-width:640px;
+    border:1px solid var(--color-border);
+    border-top:none;
+    display:flex;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--color-text-dim);
+    background:var(--color-bg-panel);
+    margin-bottom:48px;
+  }
+  .titleblock div{
+    padding:8px 14px;
+    border-right:1px solid var(--color-border);
+  }
+  .titleblock div:last-child{border-right:none;margin-left:auto;text-align:right;}
+  .titleblock b{color:var(--color-text);font-weight:600;}
+
+  @media (max-width:480px){
+    header,main{padding-left:18px;padding-right:18px;}
+    .titleblock{flex-wrap:wrap;}
+    .titleblock div{border-right:none;border-bottom:1px solid var(--color-border);width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+  <header>
+    <h1>Combine tool chests</h1>
+    <p>Select two or more Bluebeam <code>.btx</code> files. Every tool entry is kept as-is. This tool rearranges the file structure into one <code>.btx</code> file without decoding any tools.</p>
+  </header>
+
+  <main>
+    <div class="dropzone" id="dropzone">
+      <input type="file" id="fileInput" accept=".btx" multiple>
+      <div class="dz-label">Drop .btx files here, or click to browse</div>
+      <div class="dz-sub">2 or more files, combined in the order you add them</div>
+    </div>
+
+    <div class="filelist" id="fileList"></div>
+
+    <div class="options">
+      <input type="checkbox" id="dedupe" checked>
+      <label for="dedupe">Skip exact-duplicate tool entries</label>
+    </div>
+
+    <div class="field">
+      <label for="toolboxName">Toolbox name</label>
+      <input type="text" id="toolboxName" placeholder="e.g. Electrical Combined" spellcheck="false">
+    </div>
+
+    <button class="primary" id="combineBtn" disabled>Combine files</button>
+
+    <div class="result" id="result">
+      <div class="result-text">Ready: <strong id="resultName">combined.btx</strong></div>
+      <button class="download-btn" id="downloadBtn">Download</button>
+    </div>
+
+    <div class="log" id="log"></div>
+  </main>
+</div>
+
+<div class="titleblock">
+  <div><b>FILES</b> <span id="tbFiles">0</span></div>
+  <div><b>ITEMS</b> <span id="tbItems">—</span></div>
+  <div>&copy; Michael Bell</div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------
+// Merge logic. Compressed leaf fields (<Raw>, <ID>, <Data>, <Title>) are
+// stored as plain hex text inside a .btx file, so the file stays scannable
+// as tag/text tokens without ever touching the compressed payloads. This
+// only needs to find where each top-level child element starts and ends
+// and move whole blocks between files -- no zlib decode/encode involved,
+// so there's no risk of corrupting a tool through a decode/re-encode
+// mismatch.
+// ---------------------------------------------------------------------
+
+function parseBtx(xmlText) {
+  let text = xmlText;
+  let bom = '';
+  if (text.charCodeAt(0) === 0xFEFF) {
+    bom = '\uFEFF';
+    text = text.slice(1);
+  }
+
+  const declMatch = /^<\?xml[^>]*\?>/.exec(text);
+  const declaration = declMatch ? declMatch[0] : '';
+  let pos = declaration.length;
+
+  const tagRe = /<[^>]+>/g;
+  tagRe.lastIndex = pos;
+  const tokens = [];
+  let lastEnd = pos;
+  let m;
+  while ((m = tagRe.exec(text)) !== null) {
+    if (m.index > lastEnd) {
+      tokens.push({ type: 'text', raw: text.slice(lastEnd, m.index) });
+    }
+    const raw = m[0];
+    let kind, tagName = null;
+    if (/^<\//.test(raw)) {
+      kind = 'close';
+      tagName = raw.match(/^<\/\s*([^\s>/]+)/)[1];
+    } else if (/\/>\s*$/.test(raw)) {
+      kind = 'self';
+      tagName = raw.match(/^<\s*([^\s>/]+)/)[1];
+    } else if (/^<[!?]/.test(raw)) {
+      kind = 'other';
+    } else {
+      kind = 'open';
+      tagName = raw.match(/^<\s*([^\s>/]+)/)[1];
+    }
+    tokens.push({ type: 'tag', raw, start: m.index, end: tagRe.lastIndex, tagName, kind });
+    lastEnd = tagRe.lastIndex;
+  }
+  if (lastEnd < text.length) tokens.push({ type: 'text', raw: text.slice(lastEnd) });
+
+  const firstTagIdx = tokens.findIndex(t => t.type === 'tag');
+  if (firstTagIdx === -1 || tokens[firstTagIdx].kind !== 'open') {
+    throw new Error('No root element found');
+  }
+  const rootTag = tokens[firstTagIdx].tagName;
+  const rootOpenRaw = tokens[firstTagIdx].raw;
+  const prologGlue = tokens.slice(0, firstTagIdx).map(t => t.raw).join('');
+
+  const items = [];
+  let stack = [];
+  let i = firstTagIdx + 1;
+  let pendingGlue = '';
+  let rootCloseRaw = null;
+  let epilogue = '';
+  let childStart = null, childTag = null;
+  let trailingGlue = '\r\n';
+
+  for (; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.type === 'text') {
+      if (stack.length === 0) pendingGlue += t.raw;
+      continue;
+    }
+    if (stack.length === 0) {
+      if (t.kind === 'close' && t.tagName === rootTag) {
+        rootCloseRaw = t.raw;
+        trailingGlue = pendingGlue;
+        i++;
+        break;
+      }
+      if (t.kind === 'open') {
+        childStart = t.start;
+        childTag = t.tagName;
+        stack.push(t.tagName);
+      } else if (t.kind === 'self') {
+        items.push({ tag: t.tagName, raw: t.raw, precedingGlue: pendingGlue });
+        pendingGlue = '';
+      }
+    } else {
+      if (t.kind === 'open') {
+        stack.push(t.tagName);
+      } else if (t.kind === 'close') {
+        stack.pop();
+        if (stack.length === 0) {
+          const raw = text.slice(childStart, t.end);
+          items.push({ tag: childTag, raw, precedingGlue: pendingGlue });
+          pendingGlue = '';
+          childStart = null; childTag = null;
+        }
+      }
+    }
+  }
+  if (rootCloseRaw === null) throw new Error('Root close tag not found -- file may not be well-formed');
+  epilogue = tokens.slice(i).map(t => t.raw).join('');
+
+  return { bom, declaration, prologGlue, rootTag, rootOpenRaw, items, rootCloseRaw, trailingGlue, epilogue };
+}
+
+function detectRepeatingTag(items) {
+  const counts = new Map();
+  for (const it of items) counts.set(it.tag, (counts.get(it.tag) || 0) + 1);
+  let best = null, bestCount = -1;
+  for (const [tag, count] of counts) if (count > bestCount) { best = tag; bestCount = count; }
+  return best;
+}
+
+function compressZlib(text) {
+  const bytes = pako.deflate(text);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function setToolboxTitle(items, name) {
+  const hex = compressZlib(name);
+  const newRaw = `<Title>${hex}</Title>`;
+  const idx = items.findIndex(it => it.tag === 'Title');
+  if (idx >= 0) {
+    items[idx] = { tag: 'Title', raw: newRaw, precedingGlue: items[idx].precedingGlue };
+  } else {
+    const glue = items.length ? items[0].precedingGlue : '\r\n  ';
+    items.unshift({ tag: 'Title', raw: newRaw, precedingGlue: glue });
+  }
+}
+
+function combineBtx(fileTexts, opts = {}) {
+  const dedupe = opts.dedupe !== false;
+  const parsed = fileTexts.map(parseBtx);
+  const log = [];
+
+  const base = parsed[0];
+  if (opts.toolboxName) {
+    setToolboxTitle(base.items, opts.toolboxName);
+    log.push({ text: `Set toolbox name to "${opts.toolboxName}"` });
+  }
+  const baseTag = detectRepeatingTag(base.items);
+  const baseTagged = base.items.filter(it => it.tag === baseTag);
+  log.push({ text: `File 1: root=<${base.rootTag}>, merging on <${baseTag}> (${baseTagged.length} found)` });
+
+  const inferredGlue = base.items.length ? base.items[0].precedingGlue : '\r\n  ';
+
+  const seen = new Set();
+  if (dedupe) for (const it of base.items) if (it.tag === baseTag) seen.add(it.raw.trim());
+
+  const appended = [];
+  for (let f = 1; f < parsed.length; f++) {
+    const p = parsed[f];
+    const tag = detectRepeatingTag(p.items);
+    const tagged = p.items.filter(it => it.tag === tag);
+    log.push({ text: `File ${f + 1}: root=<${p.rootTag}>, merging on <${tag}> (${tagged.length} found)` });
+    if (tag !== baseTag) {
+      log.push({ text: `  WARNING: File ${f + 1}'s repeating tag <${tag}> differs from base <${baseTag}>. Appending anyway — verify the result.`, warn: true });
+    }
+    let addedHere = 0;
+    for (const it of tagged) {
+      const key = it.raw.trim();
+      if (dedupe) { if (seen.has(key)) continue; seen.add(key); }
+      appended.push(it);
+      addedHere++;
+    }
+    log.push({ text: `  -> added ${addedHere} item(s)${dedupe ? ' (after de-dupe)' : ''}` });
+  }
+
+  let bodyParts = [base.rootOpenRaw];
+  for (const it of base.items) bodyParts.push(it.precedingGlue, it.raw);
+  for (const it of appended) bodyParts.push(inferredGlue, it.raw);
+  bodyParts.push(base.trailingGlue, base.rootCloseRaw);
+
+  const finalText = base.bom + base.declaration + base.prologGlue + bodyParts.join('') + base.epilogue;
+  const totalFinal = baseTagged.length + appended.length;
+  log.push({ text: '' });
+  log.push({ text: `Combined file contains ${totalFinal} <${baseTag}> item(s) total (${appended.length} added beyond file 1).` });
+
+  return { text: finalText, log, itemTag: baseTag, totalItems: totalFinal };
+}
+
+// ---------------------------------------------------------------------
+// UI wiring
+// ---------------------------------------------------------------------
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const combineBtn = document.getElementById('combineBtn');
+const logEl = document.getElementById('log');
+const resultEl = document.getElementById('result');
+const resultName = document.getElementById('resultName');
+const downloadBtn = document.getElementById('downloadBtn');
+const dedupeCheck = document.getElementById('dedupe');
+const toolboxNameInput = document.getElementById('toolboxName');
+const tbFiles = document.getElementById('tbFiles');
+const tbItems = document.getElementById('tbItems');
+
+let files = []; // {name, text, tag, count, error}
+let combinedText = null;
+
+function slugify(name) {
+  return name.trim().toLowerCase().replace(/\s+/g, '_').replace(/[<>:"/\\|?*]/g, '');
+}
+
+function resolveOutputName() {
+  const slug = slugify(toolboxNameInput.value);
+  return (slug || 'combined') + '.btx';
+}
+
+toolboxNameInput.addEventListener('input', () => {
+  if (combinedText) resultName.textContent = resolveOutputName();
+});
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag');
+  addFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+function addFiles(fileListLike) {
+  for (const f of fileListLike) {
+    if (!/\.btx$/i.test(f.name)) continue;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const entry = { name: f.name, text: reader.result, tag: null, count: null, error: null };
+      try {
+        const parsed = parseBtx(reader.result);
+        const tag = detectRepeatingTag(parsed.items);
+        entry.tag = tag;
+        entry.count = parsed.items.filter(it => it.tag === tag).length;
+      } catch (e) {
+        entry.error = e.message;
+      }
+      files.push(entry);
+      renderFileList();
+    };
+    reader.readAsText(f);
+  }
+}
+
+let dragFromIndex = null;
+
+function renderFileList() {
+  fileListEl.innerHTML = '';
+  files.forEach((f, idx) => {
+    const row = document.createElement('div');
+    row.className = 'file-row' + (f.error ? ' error' : '');
+    row.draggable = true;
+    row.dataset.index = idx;
+
+    const grip = document.createElement('span');
+    grip.className = 'file-grip';
+    grip.title = 'Drag to reorder';
+    grip.innerHTML = '<span></span><span></span>';
+
+    const order = document.createElement('span');
+    order.className = 'file-order';
+    order.textContent = (idx + 1) + '.';
+
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = f.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'file-meta';
+    meta.textContent = f.error ? 'unreadable' : `<${f.tag}> × ${f.count}`;
+
+    const actions = document.createElement('span');
+    actions.className = 'file-actions';
+
+    const up = document.createElement('button');
+    up.className = 'file-move';
+    up.textContent = '▲';
+    up.title = 'Move up';
+    up.disabled = idx === 0;
+    up.addEventListener('click', () => { moveFile(idx, idx - 1); });
+
+    const down = document.createElement('button');
+    down.className = 'file-move';
+    down.textContent = '▼';
+    down.title = 'Move down';
+    down.disabled = idx === files.length - 1;
+    down.addEventListener('click', () => { moveFile(idx, idx + 1); });
+
+    const remove = document.createElement('button');
+    remove.className = 'file-remove';
+    remove.textContent = '×';
+    remove.title = 'Remove';
+    remove.addEventListener('click', () => { files.splice(idx, 1); renderFileList(); });
+
+    actions.append(up, down, remove);
+    row.append(grip, order, name, meta, actions);
+
+    row.addEventListener('dragstart', () => {
+      dragFromIndex = idx;
+      row.classList.add('dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      fileListEl.querySelectorAll('.file-row').forEach(r => r.classList.remove('drag-over'));
+      dragFromIndex = null;
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (dragFromIndex === null || dragFromIndex === idx) return;
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault();
+      if (dragFromIndex === null || dragFromIndex === idx) return;
+      moveFile(dragFromIndex, idx);
+    });
+
+    fileListEl.appendChild(row);
+  });
+  tbFiles.textContent = files.length;
+  const valid = files.filter(f => !f.error);
+  combineBtn.disabled = valid.length < 2;
+  resultEl.classList.remove('show');
+  combinedText = null;
+}
+
+function moveFile(from, to) {
+  if (to < 0 || to >= files.length) return;
+  const [moved] = files.splice(from, 1);
+  files.splice(to, 0, moved);
+  renderFileList();
+}
+
+combineBtn.addEventListener('click', () => {
+  const valid = files.filter(f => !f.error);
+  try {
+    const result = combineBtx(valid.map(f => f.text), {
+      dedupe: dedupeCheck.checked,
+      toolboxName: toolboxNameInput.value.trim() || null,
+    });
+    logEl.innerHTML = result.log.map(l => `<div${l.warn ? ' class="warn"' : ''}>${escapeHtml(l.text)}</div>`).join('');
+    combinedText = result.text;
+    resultName.textContent = resolveOutputName();
+    tbItems.textContent = result.totalItems;
+    resultEl.classList.add('show');
+  } catch (e) {
+    logEl.innerHTML = `<div class="warn">Error: ${escapeHtml(e.message)}</div>`;
+  }
+});
+
+downloadBtn.addEventListener('click', () => {
+  if (!combinedText) return;
+  const blob = new Blob([combinedText], { type: 'text/xml' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = resolveOutputName();
+  link.click();
+  URL.revokeObjectURL(link.href);
+});
+
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+</script>
+
+</body>
+</html>
