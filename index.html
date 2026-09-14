@@ -491,6 +491,9 @@ function combineBtx(fileTexts, opts = {}) {
   if (opts.toolboxName) {
     setToolboxTitle(base.items, opts.toolboxName);
     log.push({ text: `Set toolbox name to "${opts.toolboxName}"` });
+  } else {
+    setToolboxTitle(base.items, "Combined");
+    log.push({ text: `No toolbox name set. Set name to "Combined"` });
   }
   const baseTag = detectRepeatingTag(base.items);
   const baseTagged = base.items.filter(it => it.tag === baseTag);
